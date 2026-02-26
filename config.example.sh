@@ -14,7 +14,7 @@ AWS_REGION="us-east-2"
 AWS_INSTANCE_TYPE="t3.medium"         # Per-agent instance type
 AWS_REDIS_INSTANCE_TYPE="t3.small"    # Redis instance type
 AWS_AMI="ami-0c55b159cbfafe1f0"        # Ubuntu 22.04 LTS
-AWS_KEY_NAME="FIXME"                  # SSH key pair name - set to your actual key
+# Set AWS_KEY_NAME to your SSH key pair name in config.sh
 AWS_SUBNET_ID="subnet-xxx"            # VPC subnet
 AWS_VPC_ID="vpc-xxx"                  # VPC ID
 
@@ -32,7 +32,7 @@ REDIS_PORT=6379
 # REDIS_PASSWORD - Set in your actual config.sh if you want auth
 
 # SSH access
-SSH_KEY_PATH="${HOME}/.ssh/your-key.pem"  # Update to your actual key path
+SSH_KEY_PATH=""  # Set to path of your .pem file
 SSH_USER="ubuntu"
 
 # Networking
