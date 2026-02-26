@@ -7,8 +7,29 @@ GROUP_NAME="${group_name}"
 REDIS_HOST="${redis_host}"
 NEON_DSN="${neon_dsn}"
 CLAWDBOT_VERSION="${clawdbot_version}"
+HTTP_PROXY="${http_proxy:-}"
+HTTPS_PROXY="${https_proxy:-}"
 
 echo "Initializing agent: $AGENT_NAME (group: $GROUP_NAME)"
+
+# Configure proxy if provided (egress gateway)
+if [ -n "$HTTP_PROXY" ]; then
+  echo "Configuring egress gateway proxy: $HTTP_PROXY"
+  export http_proxy="$HTTP_PROXY"
+  export https_proxy="$HTTPS_PROXY"
+  export HTTP_PROXY="$HTTP_PROXY"
+  export HTTPS_PROXY="$HTTPS_PROXY"
+  export no_proxy="localhost,127.0.0.1,169.254.169.254,$REDIS_HOST"
+  
+  # Persist for all users
+  cat >> /etc/environment << PROXYCONF
+http_proxy=$HTTP_PROXY
+https_proxy=$HTTPS_PROXY
+HTTP_PROXY=$HTTP_PROXY
+HTTPS_PROXY=$HTTPS_PROXY
+no_proxy=localhost,127.0.0.1,169.254.169.254,$REDIS_HOST
+PROXYCONF
+fi
 
 # Install system dependencies
 apt-get update
