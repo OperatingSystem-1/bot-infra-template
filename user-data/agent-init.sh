@@ -7,8 +7,8 @@ GROUP_NAME="${group_name}"
 REDIS_HOST="${redis_host}"
 NEON_DSN="${neon_dsn}"
 CLAWDBOT_VERSION="${clawdbot_version}"
-HTTP_PROXY="${http_proxy:-}"
-HTTPS_PROXY="${https_proxy:-}"
+HTTP_PROXY="${http_proxy}"
+HTTPS_PROXY="${https_proxy}"
 
 echo "Initializing agent: $AGENT_NAME (group: $GROUP_NAME)"
 

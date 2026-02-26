@@ -25,7 +25,7 @@ http_access allow localnet
 http_access deny all
 
 # Logging format with bot metadata
-logformat audit %ts.%03tu %{X-Bot-Name}>h %{X-Group-Name}>h %>a %Ss/%03>Hs %<st %rm %ru %mt %<st
+logformat audit %ts.%03tu %%{X-Bot-Name}>h %%{X-Group-Name}>h %>a %Ss/%03>Hs %<st %rm %ru %mt %<st
 
 # Log to file for processing
 access_log /var/log/squid/access.log audit
@@ -145,7 +145,7 @@ After=squid.service
 
 [Service]
 Type=simple
-Environment="NEON_DSN=${NEON_DSN}"
+Environment="NEON_DSN=$${NEON_DSN}"
 ExecStart=/usr/bin/python3 /opt/log-shipper.py
 Restart=always
 RestartSec=10
@@ -155,7 +155,7 @@ WantedBy=multi-user.target
 SERVICECONF
 
 # Replace placeholder with actual DSN
-sed -i "s|\${NEON_DSN}|${NEON_DSN}|g" /etc/systemd/system/log-shipper.service
+sed -i "s|\$${NEON_DSN}|$${NEON_DSN}|g" /etc/systemd/system/log-shipper.service
 
 echo "=== Starting services ==="
 systemctl restart squid

@@ -1,3 +1,6 @@
+# Main configuration - Complete infrastructure with egress gateway
+# VPC + Redis + Bots + Egress Gateway (full audit trail)
+
 terraform {
   required_providers {
     aws = {
@@ -11,65 +14,36 @@ provider "aws" {
   region = var.aws_region
 }
 
-# Security group for inter-agent communication
-resource "aws_security_group" "agents" {
-  name        = "${var.group_name}-agents-sg"
-  description = "Security group for ${var.group_name} agent group"
-  vpc_id      = var.vpc_id
+# Network module - creates VPC, subnets, security groups
+module "network" {
+  source = "../modules/network"
 
-  # SSH access
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # Redis (inter-agent)
-  ingress {
-    from_port = 6379
-    to_port   = 6379
-    protocol  = "tcp"
-    self      = true
-  }
-
-  # API endpoints (inter-agent)
-  ingress {
-    from_port = 8080
-    to_port   = 8080
-    protocol  = "tcp"
-    self      = true
-  }
-
-  # Clawdbot gateway (inter-agent)
-  ingress {
-    from_port = 18789
-    to_port   = 18789
-    protocol  = "tcp"
-    self      = true
-  }
-
-  # Outbound
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name  = "${var.group_name}-agents-sg"
-    Group = var.group_name
-  }
+  group_name        = var.group_name
+  vpc_cidr          = var.vpc_cidr
+  availability_zone = "${var.aws_region}a"
 }
 
-# Redis instance
+# Egress Gateway - Squid proxy for audit logging
+module "egress_gateway" {
+  source = "../modules/egress-gateway"
+
+  group_name             = var.group_name
+  vpc_id                 = module.network.vpc_id
+  subnet_id              = module.network.public_subnet_id
+  ami_id                 = var.ami_id
+  instance_type          = var.egress_instance_type
+  key_name               = var.key_name
+  bots_security_group_id = module.network.bots_security_group_id
+  neon_dsn               = var.neon_dsn
+}
+
+# Redis instance in private subnet
 resource "aws_instance" "redis" {
   ami                    = var.ami_id
   instance_type          = var.redis_instance_type
   key_name               = var.key_name
-  subnet_id              = var.subnet_id
-  vpc_security_group_ids = [aws_security_group.agents.id]
+  subnet_id              = module.network.private_subnet_id
+  vpc_security_group_ids = [module.network.redis_security_group_id]
 
   user_data = templatefile("${path.module}/../user-data/redis-init.sh", {
     redis_password = var.redis_password
@@ -82,54 +56,77 @@ resource "aws_instance" "redis" {
   }
 }
 
-# Agent instances
-resource "aws_instance" "agent" {
+# Bot instances in public subnet (traffic routed through egress gateway)
+resource "aws_instance" "bot" {
   count = length(var.agent_names)
 
   ami                    = var.ami_id
-  instance_type          = var.agent_instance_type
+  instance_type          = var.bot_instance_type
   key_name               = var.key_name
-  subnet_id              = var.subnet_id
-  vpc_security_group_ids = [aws_security_group.agents.id]
+  subnet_id              = module.network.public_subnet_id
+  vpc_security_group_ids = [module.network.bots_security_group_id]
 
   user_data = templatefile("${path.module}/../user-data/agent-init.sh", {
-    agent_name   = var.agent_names[count.index]
-    group_name   = var.group_name
-    redis_host   = aws_instance.redis.private_ip
-    neon_dsn     = var.neon_dsn
+    agent_name       = var.agent_names[count.index]
+    group_name       = var.group_name
+    redis_host       = aws_instance.redis.private_ip
+    neon_dsn         = var.neon_dsn
     clawdbot_version = var.clawdbot_version
+    # Egress gateway proxy settings
+    http_proxy       = module.egress_gateway.proxy_url
+    https_proxy      = module.egress_gateway.proxy_url
   })
 
   tags = {
     Name      = "${var.group_name}-${var.agent_names[count.index]}"
     Group     = var.group_name
-    Role      = "agent"
+    Role      = "bot"
     AgentName = var.agent_names[count.index]
   }
 
-  depends_on = [aws_instance.redis]
+  depends_on = [aws_instance.redis, module.egress_gateway]
 }
 
-# Register agents in Neon database
-resource "null_resource" "register_agents" {
-  count = length(var.agent_names)
+# Outputs
+output "vpc_id" {
+  description = "VPC ID"
+  value       = module.network.vpc_id
+}
 
-  provisioner "local-exec" {
-    command = <<-EOF
-      psql "${var.neon_dsn}" -c "
-        INSERT INTO bots (name, group_name, ec2_instance_id, ec2_public_ip, ec2_private_ip, created_at)
-        VALUES ('${var.agent_names[count.index]}', '${var.group_name}', 
-                '${aws_instance.agent[count.index].id}',
-                '${aws_instance.agent[count.index].public_ip}',
-                '${aws_instance.agent[count.index].private_ip}',
-                NOW())
-        ON CONFLICT (name) DO UPDATE SET
-          ec2_instance_id = EXCLUDED.ec2_instance_id,
-          ec2_public_ip = EXCLUDED.ec2_public_ip,
-          ec2_private_ip = EXCLUDED.ec2_private_ip;
-      "
-    EOF
+output "redis_private_ip" {
+  description = "Redis private IP"
+  value       = aws_instance.redis.private_ip
+}
+
+output "egress_gateway_ip" {
+  description = "Egress gateway IP"
+  value       = module.egress_gateway.egress_gateway_private_ip
+}
+
+output "egress_proxy_url" {
+  description = "Proxy URL for bot configuration"
+  value       = module.egress_gateway.proxy_url
+}
+
+output "bot_public_ips" {
+  description = "Bot public IPs"
+  value       = aws_instance.bot[*].public_ip
+}
+
+output "deployment_summary" {
+  description = "Full deployment summary"
+  value = {
+    group_name       = var.group_name
+    vpc_id           = module.network.vpc_id
+    redis_ip         = aws_instance.redis.private_ip
+    egress_proxy     = module.egress_gateway.proxy_url
+    audit_table      = "tq_egress_audit"
+    bots = [
+      for i, bot in aws_instance.bot : {
+        name       = var.agent_names[i]
+        public_ip  = bot.public_ip
+        private_ip = bot.private_ip
+      }
+    ]
   }
-
-  depends_on = [aws_instance.agent]
 }
